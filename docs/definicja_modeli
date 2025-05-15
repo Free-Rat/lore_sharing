@@ -1,0 +1,37 @@
+universe
+    name: str # name is id
+    description: str
+
+event
+    id
+    name: str
+    description: str
+    referance: str
+    image
+    tumbnail
+
+timeline
+    author: user
+    description: str
+    events: [event, u64] # list of evetns with number that represents it place on timeline
+    range: u64, u64 # two numbers representing start and end of the timeline
+    unit:"second" | "minutes" | "hours" | "daily" | "weeks" ... # represnt meaning of 1 in time line
+    universe # to witch universe timeline belongs
+    branches: [branch] # list of branches for timeline
+
+# branch is a way for user to disscus, modifi each other timelines
+# if user thinks the author of timeline is wrong in some region he can select range and selcet event that should be there in his opinion
+branch 
+    author: user
+    description: str
+    orginal_timeline: timeline
+    events: [event]
+    area: (u64, u64)
+
+user
+    id
+    nickname: str
+    description: str
+    timelines: [] # list of timelies that they created (should it be ids? or objects?)
+    events: [] # list of events that they created (should it be ids? or objects?)
+    branches: [] # list of branches that they created (should it be ids? or objects?)

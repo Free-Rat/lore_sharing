@@ -1,0 +1,18 @@
+meta {
+  name: post_users
+  type: http
+  seq: 3
+}
+
+post {
+  url: http://localhost:3000/users
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "nickname": "f the king",
+    "description": "testing user"
+  }
+}

@@ -1,0 +1,18 @@
+## Rest API table
+| URI                               | GET                                     | POST                                                      | PUT                             | PATCH                  | DELETE    |
+| --------------------------------- | --------------------------------------- | --------------------------------------------------------- | ------------------------------- | ---------------------- | --------- |
+| /users                            | lista                                   | rejestracja                                               |                                 |                        |           |
+| /users/{u_id}                     | informacje                              |                                                           | aktualizacja                    | aktualizacja częściowa | usunięcie |
+| /events                           | lista                                   | tworzenie                                                 |                                 |                        |           |
+| /events/{e_id}                    | info                                    |                                                           | aktualizacja (lost update prob) | aktualizacja częściowa | usunięcie |
+| /events/{e_id}/timelines          |                                         |                                                           |                                 |                        |           |
+| /events/{e_id}/timelines/{t_id}   |                                         |                                                           |                                 |                        |           |
+| /timelines                        | lista                                   | tworzenie                                                 |                                 |                        |           |
+| /timelines/{t_id}                 | list eventów + info                     |                                                           | aktualizacja                    | aktualizacja częściowa | usunięcie |
+| /timelines/{t_id}/events          | lista eventów                           | dodajemy zdarzenie do t (exacly once)                     |                                 |                        |           |
+| /timelines/{t_id}/events/{e_id}   |                                         |                                                           |                                 |                        | usunięcie |
+| /universes                        | lista                                   | tworzenie (dokładnie raz)                                 |                                 |                        |           |
+| /universes/{uv_id}                | lista timelinów                         |                                                           |                                 |                        |           |
+| /timelines/{t_id}/branches        |                                         | tworzenie<br>(dodatkowo edytuje timelines i użytkowników) |                                 |                        |           |
+| /timelines/{t_id}/branches/{b_id} | lista różniących się eventów + info<br> |                                                           | aktualizacja                    | aktualizacja częściowa | usunięcie |
+| /timeline_merges                  |                                         | połączenie dwóch, usunięcie drugiego                      |                                 |                        |           |
