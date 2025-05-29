@@ -4,7 +4,7 @@ use crate::handlers::users::{
 use axum::routing::get;
 use axum::Router;
 
-pub fn users_router() -> Router {
+pub fn router() -> Router {
     Router::new()
         .route("/users", get(list_users).post(create_user))
         .route(

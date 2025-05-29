@@ -6,10 +6,11 @@ use axum::{
 };
 use lore_sharing::db::init_db;
 use lore_sharing::routes::{
-    users::users_router,
-    universes::universes_router,
+    users,
+    universes,
     events,
     timelines,
+    merges,
 };
 
 #[tokio::main]
@@ -32,10 +33,11 @@ async fn main() {
     let app = Router::new()
         .route("/", get(|| async { "Hello, World!" }))
         .route("/status", get(unit_handler))
-        .merge(users_router())
-        .merge(universes_router())
+        .merge(users::router())
+        .merge(universes::router())
         .merge(events::router())
         .merge(timelines::router())
+        .merge(merges::router())
         .layer(Extension(pool))
         ;
 

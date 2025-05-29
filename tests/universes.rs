@@ -1,6 +1,6 @@
 use tower::ServiceExt; // for `.oneshot()`
 use lore_sharing::db::init_db;
-use lore_sharing::routes::universes::universes_router;
+use lore_sharing::routes::universes::router;
 use axum::{
     body::Body,
     http::{Request, StatusCode},
@@ -15,7 +15,7 @@ use serde_json::Value;
 async fn test_list_users_endpoint() {
     let pool = init_db().await.expect("failed init_db");
     let app: Router = Router::new()
-        .merge(universes_router())
+        .merge(router())
         .layer(Extension(pool));
 
     let response = app

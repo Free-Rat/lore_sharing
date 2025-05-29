@@ -1,6 +1,6 @@
 use tower::ServiceExt; // for `.oneshot()`
 use lore_sharing::db::init_db;
-use lore_sharing::routes::users::users_router;
+use lore_sharing::routes::users::router;
 use axum::{
     body::{self, Body},
     http::{Request, StatusCode},
@@ -25,7 +25,7 @@ async fn test_list_users_endpoint() {
 
     // 2. Build our app with the test pool
     let app: Router = Router::new()
-        .merge(users_router())
+        .merge(router())
         .layer(Extension(pool));
 
     // 3. Issue a request to GET /users
@@ -56,7 +56,7 @@ async fn test_create_user_endpoint() {
     let pool = init_db().await.expect("failed to init db");
 
     let app = Router::new()
-        .merge(users_router())
+        .merge(router())
         .layer(Extension(pool));
 
     let payload = json!({
@@ -141,7 +141,7 @@ async fn test_get_user_by_id() {
     println!("huser {:?}", huser);
 
     let app = Router::new()
-        .merge(users_router())
+        .merge(router())
         .layer(Extension(pool.clone()));
 
     let response = app
@@ -204,7 +204,7 @@ async fn test_delete_user_by_id() {
     .0;
 
     let app = Router::new()
-        .merge(users_router())
+        .merge(router())
         .layer(Extension(pool));
 
     let response = app
@@ -239,7 +239,7 @@ async fn test_put_user_by_id() {
     .0;
 
     let app = Router::new()
-        .merge(users_router())
+        .merge(router())
         .layer(Extension(pool));
 
     let payload = json!({
