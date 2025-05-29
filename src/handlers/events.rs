@@ -1,29 +1,45 @@
 use std::sync::Arc;
-use axum::{extract::{Extension, Path}, Json};
+use axum::{extract::{Extension, Query, Path}, Json};
 use serde_json::json;
 use serde::Deserialize;
 use sqlx::{SqlitePool, QueryBuilder};
 use axum::http::StatusCode;
 use crate::models::event::Event;
 
+#[derive(Debug, Deserialize)]
+pub struct Pagination {
+    page: Option<u32>,
+    per_page: Option<u32>,
+}
+
 pub async fn list(
     Extension(pool): Extension<Arc<SqlitePool>>,
+    Query(pagination): Query<Pagination>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
+    let page = pagination.page.unwrap_or(1);
+    let per_page = pagination.per_page.unwrap_or(10);
+    let offset = (page - 1) * per_page;
+
+    let per_page_i64 = per_page as i64;
+    let offset_i64 = offset as i64;
+
     let rows = sqlx::query!(
         r#"
         SELECT id, name, description, reference, image, thumbnail, author_id
         FROM events 
         ORDER BY id
-        "#
+        LIMIT ? OFFSET ?
+        "#,
+        per_page_i64,
+        offset_i64
     )
-    .fetch_all(&*pool)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .fetch_all(&*pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let events_json = rows
         .into_iter()
         .map(|r| {
-            // println!("id:{} nick:{} desc:{:?}", r.id, r.nickname, r.description);
             json!({
                 "id": r.id,
                 "name": r.name,
@@ -38,6 +54,39 @@ pub async fn list(
 
     Ok(Json(json!(events_json)))
 }
+
+// pub async fn list(
+//     Extension(pool): Extension<Arc<SqlitePool>>,
+// ) -> Result<Json<serde_json::Value>, StatusCode> {
+//     let rows = sqlx::query!(
+//         r#"
+//         SELECT id, name, description, reference, image, thumbnail, author_id
+//         FROM events 
+//         ORDER BY id
+//         "#
+//     )
+//     .fetch_all(&*pool)
+//     .await
+//     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+//
+//     let events_json = rows
+//         .into_iter()
+//         .map(|r| {
+//             // println!("id:{} nick:{} desc:{:?}", r.id, r.nickname, r.description);
+//             json!({
+//                 "id": r.id,
+//                 "name": r.name,
+//                 "description": r.description,
+//                 "reference": r.reference,
+//                 "image": r.image,
+//                 "thumbnail": r.thumbnail,
+//                 "author_id": r.author_id
+//             })
+//         })
+//         .collect::<Vec<_>>();
+//
+//     Ok(Json(json!(events_json)))
+// }
 
 
 #[derive(Deserialize)]
