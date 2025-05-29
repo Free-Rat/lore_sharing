@@ -8,4 +8,5 @@ pub struct Event {
     pub reference: String,
     pub image: Option<String>,     // URL or path
     pub thumbnail: Option<String>, // URL or path
+    pub author_id: i64,
 }

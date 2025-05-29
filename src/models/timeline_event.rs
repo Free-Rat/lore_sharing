@@ -4,5 +4,5 @@ use serde::{Deserialize, Serialize};
 pub struct TimelineEvent {
     pub timeline_id: i64,
     pub event_id: i64,
-    pub position: u64,
+    pub position: i64,
 }

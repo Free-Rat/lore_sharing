@@ -1,18 +1,26 @@
 use std::sync::Arc;
 use axum::{extract::{Extension, Path}, Json};
 use serde_json::json;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sqlx::{SqlitePool, QueryBuilder};
 use axum::http::StatusCode;
-use crate::models::event::Event;
+use crate::models::timeline::Timeline;
 
+    // pub id: i64,
+    // pub author_id: i64,
+    // pub description: String,
+    // pub start: u64,
+    // pub end: u64,
+    // pub unit: String, // e.g., "seconds", "minutes", "hours", "days", "weeks"
+    // pub universe_name: String,
+//
 pub async fn list(
     Extension(pool): Extension<Arc<SqlitePool>>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let rows = sqlx::query!(
         r#"
-        SELECT id, name, description, reference, image, thumbnail, author_id
-        FROM events 
+        SELECT id, author_id, description, start, end, unit, universe_name 
+        FROM timelines 
         ORDER BY id
         "#
     )
@@ -20,65 +28,66 @@ pub async fn list(
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let events_json = rows
+    let timeline_json = rows
         .into_iter()
         .map(|r| {
-            // println!("id:{} nick:{} desc:{:?}", r.id, r.nickname, r.description);
             json!({
                 "id": r.id,
-                "name": r.name,
+                "author_id": r.author_id,
                 "description": r.description,
-                "reference": r.reference,
-                "image": r.image,
-                "thumbnail": r.thumbnail,
-                "author_id": r.author_id
+                "start": r.start,
+                "end": r.end,
+                "universe_name": r.universe_name,
             })
         })
         .collect::<Vec<_>>();
 
-    Ok(Json(json!(events_json)))
+    Ok(Json(json!(timeline_json)))
 }
 
 
-#[derive(Deserialize)]
-pub struct PostEvent {
-    pub name: String,
-    pub description: String,
-    pub reference: String,
-    pub image: Option<String>,     // URL or path
-    pub thumbnail: Option<String>, // URL or path
+#[derive(Deserialize, Serialize)]
+pub struct PostTimeline {
     pub author_id: i64,
+    pub description: String,
+    pub start: i64,     
+    pub end: i64, 
+    pub unit: String,
+    pub universe_name: String,
 }
 
+// TODO: validation if universe_name exists in universes
 pub async fn create(
     Extension(pool): Extension<Arc<SqlitePool>>,
-    Json(payload): Json<PostEvent>,
-) -> Result<Json<Event>, StatusCode> {
+    Json(payload): Json<PostTimeline>,
+) -> Result<Json<Timeline>, StatusCode> {
     let result = sqlx::query_as!(
-        Event,
+            // start AS "start!: u64",
+            // end AS "end!: u64",
+        Timeline,
         r#"
-        INSERT INTO events (name, description, reference, image, thumbnail, author_id)
+        INSERT INTO timelines (author_id, description, start, end, unit, universe_name)
         VALUES (?, ?, ?, ?, ?, ?)
         RETURNING 
             id AS "id!: i64",
-            name,
+            author_id AS "author_id!: i64",
             description,
-            reference,
-            image,
-            thumbnail,
-            author_id AS "author_id!: i64"
+            start, 
+            end,
+            unit,
+            universe_name
         "#,
-        payload.name,
+        payload.author_id,
         payload.description,
-        payload.reference,
-        payload.image,
-        payload.thumbnail,
-        payload.author_id
+        payload.start,
+        payload.end,
+        payload.unit,
+        payload.universe_name,
     )
     .fetch_one(&*pool)
     .await
     .map_err(|e| {
-         eprintln!("create event DB error: {:?}", e);
+         eprintln!("create timeline DB error: {:?}", e);
          StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
@@ -88,21 +97,21 @@ pub async fn create(
 pub async fn get_by_id(
     Path(id): Path<i64>,
     Extension(pool): Extension<Arc<SqlitePool>>,
-) -> Result<Json<Event>, StatusCode> {
+) -> Result<Json<Timeline>, StatusCode> {
     let result = sqlx::query_as!(
-        Event,
-        "SELECT id, name, description, reference, image, thumbnail, author_id FROM events WHERE id = ?",
+        Timeline,
+        "SELECT id, author_id, description, start, end, unit, universe_name FROM timelines WHERE id = ?",
         id
     )
     .fetch_optional(&*pool)
     .await
     .map_err(|e| {
-         eprintln!("get events by id DB error: {:?}", e);
+         eprintln!("get by id DB error: {:?}", e);
          StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
     match result {
-        Some(event) => Ok(Json(event)),
+        Some(timeline) => Ok(Json(timeline)),
         None => Err(StatusCode::NOT_FOUND),
     }
 }
@@ -111,7 +120,7 @@ pub async fn delete_by_id(
     Path(id): Path<i64>,
     Extension(pool): Extension<Arc<SqlitePool>>,
 ) -> Result<StatusCode, StatusCode> {
-    let result = sqlx::query!("DELETE FROM events WHERE id = ?", id)
+    let result = sqlx::query!("DELETE FROM timelines WHERE id = ?", id)
         .execute(&*pool)
         .await;
 
@@ -131,36 +140,35 @@ pub async fn delete_by_id(
 }
 
 #[derive(Deserialize, Debug)]
-pub struct UpdateEvent {
-    pub name: Option<String>,
+pub struct UpdateTimeline {
     pub description: Option<String>,
-    pub reference: Option<String>,
-    pub image: Option<String>,     // URL or path
-    pub thumbnail: Option<String>, // URL or path
     pub author_id: i64,
+    pub start: Option<i64>,
+    pub end: Option<i64>,
+    pub unit: Option<String>,
+    pub universe_name: Option<String>,
 }
 
 pub async fn update(
-    Path(event_id): Path<i64>,
+    Path(timeline_id): Path<i64>,
     Extension(pool): Extension<Arc<SqlitePool>>,
-    Json(payload): Json<UpdateEvent>,
-) -> Result<Json<Event>, StatusCode> {
+    Json(payload): Json<UpdateTimeline>,
+) -> Result<Json<Timeline>, StatusCode> {
     // Start building the query
-    let mut qb = QueryBuilder::<sqlx::Sqlite>::new("UPDATE events SET ");
-    // println!("{}", event_id);
+    let mut qb = QueryBuilder::<sqlx::Sqlite>::new("UPDATE timelines SET ");
     // println!("{:?}", payload);
 
     // Track whether we've added any fields
     let mut first = true;
 
-    if let Some(name) = payload.name {
-        if !first {
-            qb.push(", ");
-        }
-        qb.push("name = ");
-        qb.push_bind(name);
-        first = false;
-    }
+    // if let Some(name) = payload.name {
+    //     if !first {
+    //         qb.push(", ");
+    //     }
+    //     qb.push("name = ");
+    //     qb.push_bind(name);
+    //     first = false;
+    // }
     if let Some(desc) = payload.description {
         if !first {
             qb.push(", ");
@@ -169,28 +177,37 @@ pub async fn update(
         qb.push_bind(desc);
         first = false;
     }
-    if let Some(refer) = payload.reference {
+// author_id, description, start, end, unit, universe_name
+    if let Some(start) = payload.start {
         if !first {
             qb.push(", ");
         }
-        qb.push("reference = ");
-        qb.push_bind(refer);
+        qb.push("start = ");
+        qb.push_bind(start);
         first = false;
     }
-    if let Some(img) = payload.image {
+    if let Some(end) = payload.end {
         if !first {
             qb.push(", ");
         }
-        qb.push("image = ");
-        qb.push_bind(img);
+        qb.push("end = ");
+        qb.push_bind(end);
         first = false;
     }
-    if let Some(thumb) = payload.thumbnail {
+    if let Some(unit) = payload.unit {
         if !first {
             qb.push(", ");
         }
-        qb.push("thumbnail = ");
-        qb.push_bind(thumb);
+        qb.push("unit = ");
+        qb.push_bind(unit);
+        first = false;
+    }
+    if let Some(universe_name) = payload.universe_name {
+        if !first {
+            qb.push(", ");
+        }
+        qb.push("universe_name = ");
+        qb.push_bind(universe_name);
         first = false;
     }
 
@@ -201,7 +218,7 @@ pub async fn update(
 
     // Finish with the WHERE clause
     qb.push(" WHERE id = ");
-    qb.push_bind(event_id);
+    qb.push_bind(timeline_id);
     qb.push(" AND author_id = ");
     qb.push_bind(payload.author_id);
 
@@ -215,6 +232,6 @@ pub async fn update(
     if result.rows_affected() == 0 {
         Err(StatusCode::NOT_FOUND)
     } else {
-        Ok(get_by_id(Path(event_id), Extension(pool)).await.unwrap())
+        Ok(get_by_id(Path(timeline_id), Extension(pool)).await.unwrap())
     }
 }

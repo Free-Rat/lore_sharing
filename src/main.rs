@@ -7,7 +7,9 @@ use axum::{
 use lore_sharing::db::init_db;
 use lore_sharing::routes::{
     users::users_router,
-    universes::universes_router
+    universes::universes_router,
+    events,
+    timelines,
 };
 
 #[tokio::main]
@@ -18,7 +20,7 @@ async fn main() {
     println!("Database connected and migrations applied.");
 
     // build our application with a single route
-    // 
+    //
     // API:
     //  /users
     //  /universes
@@ -32,6 +34,8 @@ async fn main() {
         .route("/status", get(unit_handler))
         .merge(users_router())
         .merge(universes_router())
+        .merge(events::router())
+        .merge(timelines::router())
         .layer(Extension(pool))
         ;
 
@@ -41,8 +45,3 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
-
-
-
-
-
