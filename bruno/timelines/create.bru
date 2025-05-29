@@ -1,0 +1,22 @@
+meta {
+  name: create
+  type: http
+  seq: 3
+}
+
+post {
+  url: http://localhost:3000/timelines
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "author_id": 1,
+    "description": "bruno test",
+    "start": 1,
+    "end": 333,
+    "unit": "hours",
+    "universe_name": "Elden Ring"
+  }
+}

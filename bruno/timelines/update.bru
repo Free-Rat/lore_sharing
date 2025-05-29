@@ -1,0 +1,18 @@
+meta {
+  name: update
+  type: http
+  seq: 5
+}
+
+put {
+  url: http://localhost:3000/timelines/30
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "description": "chaged",
+    "author_id": 1
+  }
+}

@@ -1,0 +1,21 @@
+meta {
+  name: create
+  type: http
+  seq: 3
+}
+
+post {
+  url: http://localhost:3000/events
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+          "name": "test_event_create",
+          "description": "test description",
+          "reference": "test referance",
+          "image": "",
+          "author_id": 1
+  }
+}
