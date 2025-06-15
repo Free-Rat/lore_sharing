@@ -41,9 +41,14 @@ async fn timeline_events_crud_flow() {
         thumbnail:   None,
         author_id:   1,  // seeded test_user
     };
-    let Json(evt) = create_event(Extension(pool.clone()), Json(evt_payload))
-        .await
-        .expect("create_event failed");
+
+    let (_status, _headers, Json(evt)) = create_event(
+        Extension(pool.clone()),
+        Json(evt_payload)
+    )
+    .await
+    .unwrap();
+
 
     // —— 4. Create a Timeline
     let tl_payload = PostTimeline {

@@ -1,10 +1,37 @@
 use std::sync::Arc;
-use axum::{extract::{Extension, Query, Path}, Json};
+use axum::{
+    extract::{Extension, Path, Query},
+    Json
+};
+use axum_extra::TypedHeader;
+// use std::str::FromStr;
+use axum_extra::headers::{
+    ETag,
+    IfMatch,
+    IfNoneMatch
+};
 use serde_json::json;
-use serde::Deserialize;
+use serde::{Serialize,Deserialize};
 use sqlx::{SqlitePool, QueryBuilder};
 use axum::http::StatusCode;
 use crate::models::event::Event;
+use http::header::{HeaderMap, HeaderValue};
+use crc32fast::Hasher;
+
+// Helper to build an ETag from any serializable value:
+fn make_etag<T: Serialize>(value: &T) -> String {
+    let s = serde_json::to_string(value).unwrap();
+    let mut h = Hasher::new();
+    h.update(s.as_bytes());
+    format!("\"{:08x}\"", h.finalize())
+}
+// Instead of returning String, return headers::ETag
+// fn make_etag(event: &Event) -> ETag {
+//     // Build a proper quoted ETag
+//     // Example: let raw = format!("\"{:x}\"", hash_of_event(event));
+//     raw.parse::<ETag>()
+//         .expect("valid ETag generated")
+// }
 
 #[derive(Debug, Deserialize)]
 pub struct Pagination {
@@ -15,7 +42,8 @@ pub struct Pagination {
 pub async fn list(
     Extension(pool): Extension<Arc<SqlitePool>>,
     Query(pagination): Query<Pagination>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
+// ) -> Result<Json<serde_json::Value>, StatusCode> {
+) -> Result<(StatusCode, HeaderMap, Json<serde_json::Value>), StatusCode> {
     let page = pagination.page.unwrap_or(1);
     let per_page = pagination.per_page.unwrap_or(10);
     let offset = (page - 1) * per_page;
@@ -52,7 +80,26 @@ pub async fn list(
         })
         .collect::<Vec<_>>();
 
-    Ok(Json(json!(events_json)))
+    // build Link header
+    let mut link_parts = vec![
+        format!("<{}?page={}&per_page={}>; rel=\"self\"", "/events", page, per_page),
+    ];
+    if page > 1 {
+        link_parts.push(format!("<{}?page={}&per_page={}>; rel=\"prev\"", "/events", page-1, per_page));
+    }
+    // you could detect if there's a next page by comparing rows.len() == per_page
+    if (events_json.len() as u32) == per_page {
+        link_parts.push(format!("<{}?page={}&per_page={}>; rel=\"next\"", "/events", page+1, per_page));
+    }
+
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        http::header::LINK,
+        HeaderValue::from_str(&link_parts.join(", ")).unwrap(),
+    );
+
+    // Ok(Json(json!(events_json)))
+    Ok((StatusCode::OK, headers, Json(json!(events_json))))
 }
 
 // pub async fn list(
@@ -102,7 +149,8 @@ pub struct PostEvent {
 pub async fn create(
     Extension(pool): Extension<Arc<SqlitePool>>,
     Json(payload): Json<PostEvent>,
-) -> Result<Json<Event>, StatusCode> {
+// ) -> Result<Json<Event>, StatusCode> {
+) -> Result<(StatusCode, HeaderMap, Json<Event>), StatusCode> {
     let result = sqlx::query_as!(
         Event,
         r#"
@@ -131,30 +179,91 @@ pub async fn create(
          StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    Ok(Json(result))
+    // Ok(Json(resul
+
+    // build Location
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        http::header::LOCATION,
+        HeaderValue::from_str(&format!("/events/{}", result.id)).unwrap(),
+    );
+
+    //Compute a strong ETag for the newly-created resource
+    let etag_str = make_etag(&result);
+    headers.insert(
+        http::header::ETAG,
+        HeaderValue::from_str(&etag_str).unwrap(),
+    );
+
+    Ok((StatusCode::CREATED, headers, Json(result)))
 }
 
 pub async fn get_by_id(
     Path(id): Path<i64>,
+    maybe_if_none: Option<TypedHeader<IfNoneMatch>>,
     Extension(pool): Extension<Arc<SqlitePool>>,
-) -> Result<Json<Event>, StatusCode> {
-    let result = sqlx::query_as!(
+) -> Result<(StatusCode, HeaderMap, Json<Event>), StatusCode> {
+    // 1) Load event
+    let event = match sqlx::query_as!(
         Event,
         "SELECT id, name, description, reference, image, thumbnail, author_id FROM events WHERE id = ?",
         id
     )
     .fetch_optional(&*pool)
     .await
-    .map_err(|e| {
-         eprintln!("get events by id DB error: {:?}", e);
-         StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    {
+        Ok(Some(e)) => e,
+        Ok(None) => return Err(StatusCode::NOT_FOUND),
+        Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
+    };
 
-    match result {
-        Some(event) => Ok(Json(event)),
-        None => Err(StatusCode::NOT_FOUND),
+    // 2) Compute a *String* ETag (including quotes and optional `W/`)
+    let etag_str = make_etag(&event);
+
+    // 3) Build a typed ETag only for comparison
+    let etag = etag_str
+        .parse::<ETag>()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    // 4) Prepare your headers
+    let header_value = HeaderValue::from_str(&etag_str)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut headers = HeaderMap::new();
+    headers.insert(axum::http::header::ETAG, header_value.clone());
+
+    // 5) If-None-Match present *and* matches → 304 Not Modified
+    if let Some(TypedHeader(if_none)) = maybe_if_none {
+        // `precondition_passes()` is false when the client’s ETag *does* match ours
+        if !if_none.precondition_passes(&etag) {
+            return Ok((StatusCode::NOT_MODIFIED, headers, Json(event)));
+        }
     }
+
+    // 6) Otherwise send 200 + body
+    Ok((StatusCode::OK, headers, Json(event)))
 }
+
+// pub async fn get_by_id(
+//     Path(id): Path<i64>,
+//     Extension(pool): Extension<Arc<SqlitePool>>,
+// ) -> Result<Json<Event>, StatusCode> {
+//     let result = sqlx::query_as!(
+//         Event,
+//         "SELECT id, name, description, reference, image, thumbnail, author_id FROM events WHERE id = ?",
+//         id
+//     )
+//     .fetch_optional(&*pool)
+//     .await
+//     .map_err(|e| {
+//          eprintln!("get events by id DB error: {:?}", e);
+//          StatusCode::INTERNAL_SERVER_ERROR
+//     })?;
+//
+//     match result {
+//         Some(event) => Ok(Json(event)),
+//         None => Err(StatusCode::NOT_FOUND),
+//     }
+// }
 
 pub async fn delete_by_id(
     Path(id): Path<i64>,
@@ -191,9 +300,42 @@ pub struct UpdateEvent {
 
 pub async fn update(
     Path(event_id): Path<i64>,
+    maybe_if_match: Option<TypedHeader<IfMatch>>,
     Extension(pool): Extension<Arc<SqlitePool>>,
     Json(payload): Json<UpdateEvent>,
-) -> Result<Json<Event>, StatusCode> {
+// ) -> Result<Json<Event>, StatusCode> {
+) -> Result<(StatusCode, HeaderMap, Json<Event>), StatusCode> {
+
+    // Load current event
+    let existing: Event = sqlx::query_as!(
+        Event,
+        "SELECT id, name, description, reference, image, thumbnail, author_id \
+         FROM events WHERE id = ?",
+        event_id
+    )
+    .fetch_optional(&*pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+    // Compute current ETag
+    let current_etag_str = make_etag(&existing);
+    let current_etag: ETag = current_etag_str
+        .parse()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    println!("{:?}", maybe_if_match);
+    println!("{:?}", current_etag);
+
+    // Enforce If-Match: fail if client’s version doesn’t match
+    if let Some(TypedHeader(if_match)) = maybe_if_match {
+        // precondition_passes() == true → header absent or matches
+        // we want to **reject** when it’s present AND doesn’t match
+        if !if_match.precondition_passes(&current_etag) {
+            return Err(StatusCode::PRECONDITION_FAILED);
+        }
+    }
+
+
     // Start building the query
     let mut qb = QueryBuilder::<sqlx::Sqlite>::new("UPDATE events SET ");
     // println!("{}", event_id);
@@ -261,9 +403,30 @@ pub async fn update(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
+
+    // 5) Re-load the updated event
+    let updated: Event = sqlx::query_as!(
+        Event,
+        "SELECT id, name, description, reference, image, thumbnail, author_id \
+         FROM events WHERE id = ?",
+        event_id
+    )
+    .fetch_one(&*pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    // 6) Compute new ETag and build headers
+    let new_etag_str = make_etag(&updated);
+    let header_value = HeaderValue::from_str(&new_etag_str)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut headers = HeaderMap::new();
+    headers.insert(axum::http::header::ETAG, header_value);
+
     if result.rows_affected() == 0 {
         Err(StatusCode::NOT_FOUND)
     } else {
-        Ok(get_by_id(Path(event_id), Extension(pool)).await.unwrap())
+        // 7) Return 200 OK + ETag + updated body
+        Ok((StatusCode::OK, headers, Json(updated)))
+        // Ok(get_by_id(Path(event_id), None, Extension(pool)).await.unwrap())
     }
 }

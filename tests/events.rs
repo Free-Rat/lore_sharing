@@ -7,7 +7,8 @@ use axum::{
     Router,
     Extension,
     Json,
-    extract::Path
+    extract::Path,
+    // response::IntoResponse
 };
 use serde_json::{json, Value};
 use lore_sharing::handlers::events;
@@ -128,19 +129,27 @@ async fn test_get_by_id() {
         author_id: 1,
     };
 
-    let new_event = events::create(
+    // let new_event = events::create(
+    //     Extension(pool.clone()),
+    //     Json(payload)
+    // )
+    // .await
+    // .unwrap()
+    // .0; // if handler returns Result<Json<User>, _>
+    
+    let (_status, _headers, Json(new_event)) = events::create(
         Extension(pool.clone()),
         Json(payload)
     )
     .await
-    .unwrap()
-    .0; // if handler returns Result<Json<User>, _>
+    .unwrap();
 
     println!("=============== test_get_endpoint =======================");
     println!("new event {:?}", new_event);
 
     let hevent = events::get_by_id(
         Path(new_event.id),
+        None,
         Extension(pool.clone())
     )
     .await
@@ -198,7 +207,8 @@ async fn test_get_by_id() {
 async fn test_delete_by_id() {
     let pool = init_db().await.unwrap();
 
-    let event = events::create(
+
+    let (_status, _headers, Json(event)) = events::create(
         Extension(pool.clone()),
         Json(events::PostEvent{
             name: "test_event_delete_by_id".to_string(),
@@ -210,8 +220,7 @@ async fn test_delete_by_id() {
         }),
     )
     .await
-    .unwrap()
-    .0;
+    .unwrap();
 
     let app = Router::new()
         .merge(router())
@@ -236,20 +245,19 @@ async fn test_delete_by_id() {
 async fn test_put_by_id() {
     let pool = init_db().await.unwrap();
 
-    let event = events::create(
+    let (_status, headers, Json(event)) = events::create(
         Extension(pool.clone()),
         Json(events::PostEvent{
             name: "test_event_put".to_string(),
             description: "test description".to_owned(),
             reference: "test referance".to_owned(),
-            image: None,
+            image: None::<String>,
             thumbnail: None,
             author_id: 1,
         }),
     )
     .await
-    .unwrap()
-    .0;
+    .unwrap();
 
     let app = Router::new()
         .merge(router())
@@ -261,6 +269,13 @@ async fn test_put_by_id() {
         "author_id": 1
     });
 
+    // Extract the ETag string (should be present)
+    let etag_value = headers
+        .get(axum::http::header::ETAG)
+        .expect("create must return ETag")
+        .to_str()
+        .unwrap();
+
     let response = app
         .clone()
         .oneshot(
@@ -268,6 +283,7 @@ async fn test_put_by_id() {
                 .method("PUT")
                 .uri(format!("/events/{}", event.id))
                 .header("Content-Type", "application/json")
+                .header("If-Match", etag_value)
                 .body(Body::from(payload.to_string()))
                 .unwrap(),
         )
