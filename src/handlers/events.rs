@@ -8,7 +8,9 @@ use axum_extra::TypedHeader;
 use axum_extra::headers::{
     ETag,
     IfMatch,
-    IfNoneMatch
+    IfNoneMatch,
+    Authorization,
+    authorization::Bearer
 };
 use serde_json::json;
 use serde::{Serialize,Deserialize};
@@ -17,6 +19,7 @@ use axum::http::StatusCode;
 use crate::models::event::Event;
 use http::header::{HeaderMap, HeaderValue};
 use crc32fast::Hasher;
+use crate::handlers::one_time_tokens::{consume_or_replay, store_response_for_token};
 
 // Helper to build an ETag from any serializable value:
 fn make_etag<T: Serialize>(value: &T) -> String {
@@ -136,7 +139,7 @@ pub async fn list(
 // }
 
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct PostEvent {
     pub name: String,
     pub description: String,
@@ -148,9 +151,21 @@ pub struct PostEvent {
 
 pub async fn create(
     Extension(pool): Extension<Arc<SqlitePool>>,
+    TypedHeader(Authorization(bearer)): TypedHeader<Authorization<Bearer>>,
     Json(payload): Json<PostEvent>,
 // ) -> Result<Json<Event>, StatusCode> {
 ) -> Result<(StatusCode, HeaderMap, Json<Event>), StatusCode> {
+
+    let token = bearer.token();
+    // If it was already used & stored → replay
+    if let Some((status, headers, body_bytes)) =
+        consume_or_replay(&*pool, token).await?
+    {
+        // body_bytes is raw JSON; wrap it back into Json<Event> if you like
+        let event: Event = serde_json::from_slice(&body_bytes).unwrap();
+        return Ok((status, headers, Json(event)));
+    }
+
     let result = sqlx::query_as!(
         Event,
         r#"
@@ -193,7 +208,10 @@ pub async fn create(
     headers.insert(
         http::header::ETAG,
         HeaderValue::from_str(&etag_str).unwrap(),
-    );
+    );    
+
+    let body_bytes = serde_json::to_vec(&result).unwrap();
+    store_response_for_token(&*pool, token, StatusCode::OK, &headers, &body_bytes).await?;
 
     Ok((StatusCode::CREATED, headers, Json(result)))
 }

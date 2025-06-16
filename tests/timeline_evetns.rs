@@ -13,12 +13,17 @@ use serde_json::{json, Value};
 use lore_sharing::routes::{
     events::router     as events_router,
     timelines::router  as timelines_router,
+    one_time_tokens::router as token_router,
 };
 use lore_sharing::handlers::{
-    events::{create as create_event, PostEvent},
+    events::{
+        // create as create_event,
+        PostEvent
+    },
     timelines::{create as create_timeline, PostTimeline},
     timeline_events::{PostTimelineEvent, UpdateTimelineEvent},
 };
+use lore_sharing::models::event::Event;
 
 #[tokio::test]
 async fn timeline_events_crud_flow() {
@@ -27,7 +32,31 @@ async fn timeline_events_crud_flow() {
     let app = Router::new()
         .merge(events_router())
         .merge(timelines_router())
+        .merge(token_router()) // add router for issuing tokens
         .layer(Extension(pool.clone()));
+
+    let token_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/one_time_tokens")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(token_response.status(), StatusCode::OK);
+
+    let body_bytes = to_bytes(token_response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let token_json: Value = serde_json::from_slice(&body_bytes).unwrap();
+    let token = token_json
+        .get("token")
+        .and_then(Value::as_str)
+        .expect("token must be a string");
+    let auth_header = format!("Bearer {}", token);
 
     // —— 2. Create a Universe
     let uni_test = "Elden Ring".to_owned();
@@ -42,13 +71,22 @@ async fn timeline_events_crud_flow() {
         author_id:   1,  // seeded test_user
     };
 
-    let (_status, _headers, Json(evt)) = create_event(
-        Extension(pool.clone()),
-        Json(evt_payload)
-    )
-    .await
-    .unwrap();
-
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/events")
+                .header("Content-Type", "application/json")
+                .header("Authorization", auth_header.clone())
+                .body(Body::from(json!(evt_payload).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let evt: Event = serde_json::from_slice(&body).unwrap();
 
     // —— 4. Create a Timeline
     let tl_payload = PostTimeline {

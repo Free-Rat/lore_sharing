@@ -2,7 +2,7 @@ use tower::ServiceExt; // for `.oneshot()`
 use lore_sharing::db::init_db;
 use lore_sharing::routes::events::router;
 use axum::{
-    body::{self, Body},
+    body::{self, Body, to_bytes},
     http::{Request, StatusCode},
     Router,
     Extension,
@@ -12,6 +12,41 @@ use axum::{
 };
 use serde_json::{json, Value};
 use lore_sharing::handlers::events;
+use axum_extra::TypedHeader;
+use axum_extra::headers::authorization::{Bearer, Authorization};
+use lore_sharing::routes::one_time_tokens;
+
+async fn get_token_header(app: Router) -> TypedHeader<Authorization<Bearer>> {
+    let token_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/one_time_tokens")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(token_response.status(), StatusCode::OK);
+
+    let body_bytes = to_bytes(token_response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let token_json: Value = serde_json::from_slice(&body_bytes).unwrap();
+    let token = token_json
+        .get("token")
+        .and_then(Value::as_str)
+        .expect("token must be a string");
+    // format!("Bearer {}", token)
+    //
+    // build and unwrap the Authorization header
+    let auth: Authorization<Bearer> =
+        Authorization::bearer(token)
+            .expect("invalid bearer token format");
+
+    TypedHeader(auth)
+}
 
 #[tokio::test]
 async fn test_list_endpoint() {
@@ -59,6 +94,7 @@ async fn test_create_endpoint() {
 
     let app = Router::new()
         .merge(router())
+        .merge(one_time_tokens::router())
         .layer(Extension(pool));
 
     let payload = json!({
@@ -69,6 +105,9 @@ async fn test_create_endpoint() {
         "author_id": 1,
     });
 
+    let auth_header = get_token_header(app.clone()).await;
+    // let raw_value = auth_header.0.token();
+
     let response = app
         .clone()
         .oneshot(
@@ -76,6 +115,8 @@ async fn test_create_endpoint() {
                 .method("POST")
                 .uri("/events")
                 .header("Content-Type", "application/json")
+                // .header("Authorization", raw_value)
+                .header("Authorization", format!("Bearer {}", auth_header.0.token()))
                 .body(Body::from(payload.to_string()))
                 .unwrap(),
         )
@@ -85,7 +126,6 @@ async fn test_create_endpoint() {
     println!("{:?}", response.body());
     println!("Create event status: {:?}", response.status());
 
-    // assert_eq!(response.status(), StatusCode::CREATED); // or 200 if that's what your handler returns
     assert!(matches!(
         response.status(),
         StatusCode::OK | StatusCode::CREATED
@@ -120,6 +160,11 @@ async fn test_create_endpoint() {
 async fn test_get_by_id() {
     let pool = init_db().await.unwrap();
 
+    let app = Router::new()
+        .merge(router())
+        .merge(one_time_tokens::router())
+        .layer(Extension(pool.clone()));
+
     let payload = events::PostEvent{
         name: "test_event_get_by_id".to_string(),
         description: "test description".to_owned(),
@@ -139,6 +184,7 @@ async fn test_get_by_id() {
     
     let (_status, _headers, Json(new_event)) = events::create(
         Extension(pool.clone()),
+        get_token_header(app).await,
         Json(payload)
     )
     .await
@@ -207,9 +253,14 @@ async fn test_get_by_id() {
 async fn test_delete_by_id() {
     let pool = init_db().await.unwrap();
 
+    let app = Router::new()
+        .merge(router())
+        .merge(one_time_tokens::router())
+        .layer(Extension(pool.clone()));
 
     let (_status, _headers, Json(event)) = events::create(
         Extension(pool.clone()),
+        get_token_header( app).await,
         Json(events::PostEvent{
             name: "test_event_delete_by_id".to_string(),
             description: "test description".to_owned(),
@@ -245,8 +296,14 @@ async fn test_delete_by_id() {
 async fn test_put_by_id() {
     let pool = init_db().await.unwrap();
 
+    let app = Router::new()
+        .merge(router())
+        .merge(one_time_tokens::router())
+        .layer(Extension(pool.clone()));
+
     let (_status, headers, Json(event)) = events::create(
         Extension(pool.clone()),
+        get_token_header(app).await,
         Json(events::PostEvent{
             name: "test_event_put".to_string(),
             description: "test description".to_owned(),

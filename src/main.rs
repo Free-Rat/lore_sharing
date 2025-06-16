@@ -11,6 +11,7 @@ use lore_sharing::routes::{
     events,
     timelines,
     merges,
+    one_time_tokens,
 };
 
 #[tokio::main]
@@ -38,6 +39,7 @@ async fn main() {
         .merge(events::router())
         .merge(timelines::router())
         .merge(merges::router())
+        .merge(one_time_tokens::router())
         .layer(Extension(pool))
         ;
 
